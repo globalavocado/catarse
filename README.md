@@ -20,7 +20,7 @@ The official repo is https://github.com/catarse/catarse
 To run this project you need to have:
 
 * Ruby 2.2.2
-* [PostgreSQL](http://www.postgresql.org/)
+* [PostgreSQL](http://www.postgresql.org/) - at least 9.4
   * OSX - [Postgres.app](http://postgresapp.com/)
   * Linux - `$ sudo apt-get install postgresql`
   * Windows - [PostgreSQL for Windows](http://www.postgresql.org/download/windows/)
