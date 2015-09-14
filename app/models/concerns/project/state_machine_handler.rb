@@ -7,6 +7,10 @@ module Project::StateMachineHandler
       state :draft, value: 'draft'
       state :rejected, value: 'rejected'
 
+      state :in_analysis do
+        validates_presence_of :city
+      end
+
       #validations starting in in_analysis
       state :in_analysis, :approved, :online, :successful, :waiting_funds, :failed do
         validates_presence_of :about_html, :headline, :goal, :online_days, :budget
