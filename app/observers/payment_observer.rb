@@ -18,6 +18,7 @@ class PaymentObserver < ActiveRecord::Observer
   end
 
   def from_pending_refund_to_refunded(payment)
+    return if payment.is_donation?
     payment.contribution.notify_to_contributor((payment.slip_payment? ? :refund_completed_slip : :refund_completed_credit_card))
   end
   alias :from_paid_to_refunded :from_pending_refund_to_refunded
@@ -43,8 +44,6 @@ class PaymentObserver < ActiveRecord::Observer
 
   def from_paid_to_refused(payment)
     contribution = payment.contribution
-    contribution.notify_to_backoffice(:contribution_canceled_after_confirmed,
-                                      { from_email: contribution.user.email, from_name: contribution.user.name })
     contribution.notify_to_contributor( :contribution_canceled ) if !payment.slip_payment?
   end
   alias :from_pending_to_refused :from_paid_to_refused

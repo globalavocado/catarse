@@ -1,7 +1,6 @@
 # coding: utf-8
 class ApplicationController < ActionController::Base
   include Concerns::ExceptionHandler
-  include Concerns::MenuHandler
   include Concerns::SocialHelpersHandler
   include Concerns::AnalyticsHelpersHandler
   include Pundit
@@ -11,6 +10,7 @@ class ApplicationController < ActionController::Base
     include NewRelic::Agent::Instrumentation::Rails3::ActionController
   end
 
+  acts_as_token_authentication_handler_for User, fallback: :none
   layout 'catarse_bootstrap'
   protect_from_forgery
 
@@ -20,8 +20,6 @@ class ApplicationController < ActionController::Base
     :render_feeds, :can_display_pending_refund_alert?
 
   before_filter :set_locale
-
-  before_action :referral_it!
 
   before_action :force_www
 
@@ -50,7 +48,13 @@ class ApplicationController < ActionController::Base
   end
 
   def referral_it!
-    session[:referral_link] ||= params[:ref] || request.env["HTTP_REFERER"]
+    if request.env["HTTP_REFERER"] =~ /catarse\.me/
+      # For local referrers we only want to store the first ref parameter
+      session[:referral_link] ||= params[:ref]
+    else
+      # For external referrers should always overwrite referral_link
+      session[:referral_link] = params[:ref] || request.env["HTTP_REFERER"]
+    end
   end
 
   private
