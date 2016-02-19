@@ -135,118 +135,6 @@ RSpec.describe User, type: :model do
     it{ is_expected.to eq [user] }
   end
 
-  describe ".has_credits" do
-    subject{ User.has_credits }
-
-    context "when he has credits in the user_total" do
-      before do
-        with_credit = create(:confirmed_contribution, project: failed_project)
-        with_credit.payments.first.update_attributes({gateway: 'MoIP'})
-
-        @user_with_credits = with_credit.user
-        failed_project.update_attributes state: 'failed'
-        payment = create(:confirmed_contribution, project: successful_project).payments.first
-        payment.update_attributes({gateway: 'MoIP'})
-
-        UserTotal.refresh_view
-      end
-      it{ is_expected.to eq([@user_with_credits]) }
-    end
-
-    context "when he has credits in the user_total but is checked with zero credits" do
-      before do
-        b = create(:confirmed_contribution, value: 100, project: failed_project)
-        b.payments.first.update_attributes({gateway: 'MoIP'})
-        failed_project.update_attributes state: 'failed'
-        @u = b.user
-
-        b = create(:confirmed_contribution, value: 100, project: successful_project)
-        b.payments.first.update_attributes({gateway: 'MoIP'})
-        @u.update_attributes(zero_credits: true)
-        UserTotal.refresh_view
-      end
-      it{ is_expected.to eq([]) }
-    end
-  end
-
-  describe ".has_not_used_credits_last_month" do
-    subject{ User.has_not_used_credits_last_month }
-
-    context "when he has used credits in the last month" do
-      before do
-        create(:contribution_with_credits)
-      end
-      it{ is_expected.to eq([]) }
-    end
-
-    context "when he has not used credits in the last month" do
-      before do
-        with_credits  = create(:confirmed_contribution, project: failed_project)
-        with_credits.payments.first.update_attributes({gateway: 'MoIP'})
-        @user_with_credits = with_credits.user
-        failed_project.update_attributes state: 'failed'
-        UserTotal.refresh_view
-      end
-      it{ is_expected.to eq([@user_with_credits]) }
-    end
-  end
-
-  describe ".by_payer_email" do
-    before do
-      p = create(:payment_notification)
-      contribution = p.contribution
-      @u = contribution.user
-      p.extra_data = {'payer_email' => 'foo@bar.com'}
-      p.save!
-      p = create(:payment_notification, contribution: contribution)
-      p.extra_data = {'payer_email' => 'another_email@bar.com'}
-      p.save!
-      p = create(:payment_notification)
-      p.extra_data = {'payer_email' => 'another_email@bar.com'}
-      p.save!
-    end
-    subject{ User.by_payer_email 'foo@bar.com' }
-    it{ is_expected.to eq([@u]) }
-  end
-
-  describe ".by_key" do
-    before do
-      @payment = create(:payment)
-      @contribution = create(:contribution, payments: [@payment])
-      @user = @contribution.user
-      create(:contribution)
-    end
-    subject{ User.by_key @payment.key }
-    it{ is_expected.to eq([@user]) }
-  end
-
-  describe ".by_id" do
-    before do
-      @u = create(:user)
-      create(:user)
-    end
-    subject{ User.by_id @u.id }
-    it{ is_expected.to eq([@u]) }
-  end
-
-  describe ".by_name" do
-    before do
-      @u = create(:user, name: 'Foo Bar')
-      create(:user, name: 'Baz Qux')
-    end
-    subject{ User.by_name 'Bar' }
-    it{ is_expected.to eq([@u]) }
-  end
-
-  describe ".by_email" do
-    before do
-      @u = create(:user, email: 'foo@bar.com')
-      create(:user, email: 'another_email@bar.com')
-    end
-    subject{ User.by_email 'foo@bar' }
-    it{ is_expected.to eq([@u]) }
-  end
-
   describe ".who_contributed_project" do
     subject{ User.who_contributed_project(successful_project.id) }
     before do
@@ -434,8 +322,8 @@ RSpec.describe User, type: :model do
   end
 
   describe "#credits" do
-    def create_contribution_with_payment user, project, value, credits, payment_state = 'paid'
-      c = create(:confirmed_contribution, user_id: user.id, project: project)
+    def create_contribution_with_payment user, project, value, credits, payment_state = 'paid', donation = nil
+      c = create(:confirmed_contribution, user_id: user.id, project: project, donation: donation)
       c.payments.first.update_attributes gateway: (credits ? 'Credits' : 'AnyButCredits'), value: value, state: payment_state
     end
     before do
@@ -448,15 +336,17 @@ RSpec.describe User, type: :model do
       create_contribution_with_payment @u, failed_project, 100, true
       create_contribution_with_payment @u, failed_project, 200, false, 'pending_refund'
       create_contribution_with_payment @u, failed_project, 200, false, 'refunded'
+      @payment_donation = Donation.create(user: @u, amount: 10)
+      create_contribution_with_payment @u, failed_project, 10, false, 'refunded', @payment_donation
+      Donation.create(user: @u, amount: 30)
 
       failed_project.update_attributes state: 'failed'
       successful_project.update_attributes state: 'successful'
-      UserTotal.refresh_view
     end
 
     subject{ @u.credits }
 
-    it{ is_expected.to eq(50.0) }
+    it{ is_expected.to eq(20.0) }
   end
 
   describe "#update_attributes" do
@@ -649,34 +539,6 @@ RSpec.describe User, type: :model do
 
     context "when not following any category" do
       it { is_expected.to eq(false) }
-    end
-  end
-
-  describe "PostgREST users synchronization" do
-    it "should delete api user on user destroy" do
-      user = create(:user)
-      user.bank_account.destroy!
-      User.connection.select_all("DELETE FROM public.users WHERE email = '#{user.email}'")
-      expect(User.connection.select_all("SELECT * FROM postgrest.auth WHERE id = '#{user.email}'").count).to eq 0
-    end
-
-    it "should update api user on user update" do
-      user = create(:user)
-      user.email = 'foo@bar.com'
-      user.admin = true
-      user.save!
-      api_user = User.connection.select_all("SELECT * FROM postgrest.auth WHERE id = '#{user.id}'")[0]
-      expect(api_user["id"]).to eq user.id.to_s
-      expect(api_user["rolname"]).to eq 'admin'
-      expect(api_user["pass"].size).to eq 60
-    end
-
-    it "should create api user on user creation" do
-      user = create(:user)
-      api_user = User.connection.select_all("SELECT * FROM postgrest.auth WHERE id = '#{user.id}'")[0]
-      expect(api_user["id"]).to eq user.id.to_s
-      expect(api_user["rolname"]).to eq 'web_user'
-      expect(api_user["pass"].size).to eq 60
     end
   end
 end

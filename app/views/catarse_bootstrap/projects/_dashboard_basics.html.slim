@@ -14,6 +14,22 @@
                   input_html: { class: 'positive medium', required: true },
                   validation_text: false
 
+                = form.input :all_tags, as: :string, 
+                  wrapper: :two_columns,
+                  wrapper_class: 'w-row u-marginbottom-30 card card-terciary medium',
+                  label_wrapper_html: { class: 'w-col w-col-5 w-subcol' },
+                  text_field_wrapper_html: { class: 'w-col w-col-7 w-sub-col' },
+                  input_html: { class: 'positive medium', required: false },
+                  validation_text: false
+
+                = form.input :service_fee, as: :numeric,
+                  wrapper: :two_columns,
+                  wrapper_class: 'w-row u-marginbottom-30 card card-terciary medium',
+                  label_wrapper_html: { class: 'w-col w-col-5 w-subcol' },
+                  text_field_wrapper_html: { class: 'w-col w-col-7 w-sub-col' },
+                  input_html: { class: 'positive medium', required: false },
+                  validation_text: false
+
               = form.input :name, as: :string, 
                 wrapper: :two_columns,
                 wrapper_class: 'w-row u-marginbottom-30 card card-terciary medium',
@@ -25,7 +41,7 @@
               = form.input :permalink, as: :string, 
                 wrapper: :two_columns_with_postfix,
                 wrapper_class: 'w-row u-marginbottom-30 card card-terciary medium',
-                label_wrapper_html: { class: 'w-col w-col-5 w-subcol' },
+                label_wrapper_html: { class: 'w-col w-col-5 w-subcol fontsize-base-children' },
                 text_field_wrapper_html: { class: 'w-col w-col-7 w-sub-col' },
                 input_html: { class: 'postfix positive medium', required: true },
                 field_wrapper_html: { class: 'w-col w-col-8 w-col-small-6 w-col-tiny-6' },
@@ -51,7 +67,7 @@
                     label.field-label.fontsize-smallest.fontcolor-secondary=t('simple_form.hints.project.city')
                   .w-col.w-col-7
                     = text_field_tag :city_name, ( @project.city.show_name if @project.city ), class: 'string optional w-input text-field w-input text-field positive city-search-input', autocomplete: "off"
-                    input#project_city_id.w-hidden name="project[city_id]" type="text" /
+                    input#project_city_id.w-hidden name="project[city_id]" type="text" value="#{@project.city.try(:id)}"/
                     .table-outer.search-pre-result.w-hidden
 
     .section

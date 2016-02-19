@@ -18,9 +18,12 @@ class ProjectPolicy < ApplicationPolicy
     create?
   end
 
+  def push_to_flex?
+    is_admin?
+  end
+
   def update_account?
-    record.account.invalid? || 
-      ['online', 'waiting_funds', 'successful', 'failed'].exclude?(record.state) || is_admin?
+    record.account.new_record? || !record.published? || is_admin?
   end
 
   def send_to_analysis?
@@ -34,6 +37,7 @@ class ProjectPolicy < ApplicationPolicy
   def permitted_attributes
     if user.present? && (user.admin? || (record.draft? || record.rejected? || record.in_analysis?))
       p_attr = record.attribute_names.map(&:to_sym)
+      p_attr << :all_tags
       p_attr << user_attributes
       p_attr << budget_attributes
       p_attr << posts_attributes
@@ -72,7 +76,7 @@ class ProjectPolicy < ApplicationPolicy
 
   def account_attributes
     if done_by_owner_or_admin?
-      { account_attributes: ProjectAccount.attribute_names.map(&:to_sym) }
+      { account_attributes: ProjectAccount.attribute_names.map(&:to_sym) << :input_bank_number }
     end
   end
 

@@ -18,6 +18,36 @@ RSpec.describe Payment, type: :model do
     it{ should validate_presence_of :installments }
   end
 
+  describe "#save" do
+    let(:reward){ create(:reward, maximum_contributions: 1, project: project) }
+    let(:contribution){ create(:contribution, reward: reward, project: reward.project) }
+    let(:payment){ build(:payment, contribution: contribution) }
+
+    context "when project is still open for payments" do
+      let(:project){ create(:project) }
+
+      # This validation is implemented in the database schema
+      it "should not create when reward is sold_out" do
+        # creates payment to let reward in sold_out state
+        create(:payment, contribution: contribution, value: payment.value + 1)
+        expect{ payment.save }.to raise_error(/Reward for contribution/)
+      end
+    end
+
+    context "when project is expired" do
+      let(:project){ create_project({state: 'online', online_days: 2, expires_at: 2.days.ago}, {created_at: Time.current, to_state: 'online'}) }
+
+      before do
+        payment.valid?
+      end
+
+      # This validation is implemented in the database schema
+      it "should not create when project is past expires_at" do
+        expect(payment.errors[:project]).to_not be_nil
+      end
+    end
+  end
+
   describe "#is_unique_within_period" do
     subject{ payment }
     let(:contribution){ create(:contribution) }
@@ -75,6 +105,29 @@ RSpec.describe Payment, type: :model do
         project.update_column(:state, 'failed')
       end
       it{ is_expected.to be_valid }
+    end
+  end
+
+  describe "#slip_expired?" do
+    subject{ payment.slip_expiration_date }
+
+    context "when is a new record" do
+      let(:payment){ Payment.new }
+      it{ is_expected.to_not be_nil }
+    end
+  end
+
+  describe "#slip_expired?" do
+    subject { payment.slip_expired? }
+
+    context "when slipt is past expiration date" do
+      let(:payment){ create(:payment, state: 'pending', created_at: (Time.now - (Payment.slip_expiration_weekdays.day + 3.day))) }
+      it{ is_expected.to eq true }
+    end
+
+    context "when slip is not past expiration date" do
+      let(:payment){ create(:payment, state: 'pending') }
+      it{ is_expected.to eq false }
     end
   end
 

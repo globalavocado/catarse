@@ -1,33 +1,30 @@
 # coding: utf-8
 class ApiTokensController < ApplicationController
+  TOKEN_TTL = 1.hour
+
   def show
-    unless CatarseSettings[:api_host].present?
-      return render json: {error: "you need to have CatarseSettings[:api_host] configured to get an API token"}, status: 500
+    unless CatarseSettings[:api_host].present? && CatarseSettings[:jwt_secret].present?
+      return render json: {error: "you need to have api_host and jwt_secret configured to get an API token"}, status: 500
     end
 
     unless current_user.present?
       return render json: {error: "only authenticated users can request the API token"}, status: 401
     end
 
-    render json: http_auth_response.body, status: http_auth_response.code
+    expires_in TOKEN_TTL, public: false
+    render json: {token: jwt}, status: 200
   end
 
-  def http_requester
-    Typhoeus
+  def jwt
+    @jwt ||= JsonWebToken.sign(claims, key: CatarseSettings[:jwt_secret])
   end
 
-  def http_auth_response
-    @http_response ||= http_requester.post(
-      "#{CatarseSettings[:api_host]}/postgrest/tokens",
-      headers: {
-        'Content-Type' => 'application/json',
-        'Accept' => 'application/json'
-      },
-      body: {
-        id: current_user.id.to_s,
-        pass: current_user.authentication_token
-      }.to_json
-    )
+  def claims
+    {
+      role: current_user.admin ? 'admin' : 'web_user',
+      user_id: current_user.id.to_s,
+      exp: (Time.now + TOKEN_TTL).to_i
+    }
   end
 end
 

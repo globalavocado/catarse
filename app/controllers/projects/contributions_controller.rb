@@ -1,4 +1,5 @@
 class Projects::ContributionsController < ApplicationController
+  DEFAULT_AMOUNT = 30
   inherit_resources
   actions :index, :show, :new, :update, :review, :create
   skip_before_filter :verify_authenticity_token, only: [:moip]
@@ -30,7 +31,7 @@ class Projects::ContributionsController < ApplicationController
   end
 
   def new
-    @contribution = Contribution.new(project: parent, value: 10)
+    @contribution = Contribution.new(project: parent, value: (params[:amount].presence || DEFAULT_AMOUNT).to_i)
     authorize @contribution
 
     @title = t('projects.contributions.new.title', name: @project.name)
@@ -47,7 +48,7 @@ class Projects::ContributionsController < ApplicationController
     @contribution = parent.contributions.new.localized
     @contribution.user = current_user
     @contribution.value = permitted_params[:value]
-    @contribution.referral_link = referral_link
+    @contribution.origin = Origin.process_hash(referral)
     @contribution.reward_id = (params[:contribution][:reward_id].to_i == 0 ? nil : params[:contribution][:reward_id])
     authorize @contribution
     @contribution.update_current_billing_info
@@ -83,8 +84,12 @@ class Projects::ContributionsController < ApplicationController
 
   protected
   def load_rewards
-    empty_reward = Reward.new(minimum_value: 0, description: t('projects.contributions.new.no_reward'))
-    @rewards = [empty_reward] + @project.rewards.remaining.order(:minimum_value)
+    if @project.rewards.present?
+      empty_reward = Reward.new(minimum_value: 0, description: t('projects.contributions.new.no_reward'))
+      @rewards = [empty_reward] + @project.rewards.remaining.order(:minimum_value)
+    else
+      @rewards = []
+    end
   end
 
   def permitted_params

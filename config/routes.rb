@@ -14,13 +14,12 @@ Catarse::Application.routes.draw do
     post '/sign_up', {to: 'devise/registrations#create', as: :sign_up}
   end
 
+  get '/project_edit' => 'application#redirect_to_last_edit'
   get '/thank_you' => "static#thank_you"
 
   filter :locale, exclude: /\/auth\//
 
-  mount CatarseMoip::Engine => "/", as: :catarse_moip
   mount CatarsePagarme::Engine => "/", as: :catarse_pagarme
-  mount CatarseApi::Engine => "/api", as: :catarse_api
  #mount CatarseWepay::Engine => "/", as: :catarse_wepay
   mount Dbhero::Engine => "/dbhero", as: :dbhero
 
@@ -38,8 +37,18 @@ Catarse::Application.routes.draw do
     end
   end
   resources :auto_complete_projects, only: [:index]
-  resources :donations, only: [:create]
+  resources :donations, only: [:create] do
+    collection do
+      get :confirm
+    end
+  end
   resources :auto_complete_cities, only: [:index]
+  resources :flexible_projects do
+    member do
+      get :publish
+      get :finish
+    end
+  end
   resources :projects, only: [ :index, :create, :update, :edit, :new, :show] do
     resources :accounts, only: [:create, :update]
     resources :posts, controller: 'projects/posts', only: [ :destroy ]
@@ -60,7 +69,9 @@ Catarse::Application.routes.draw do
 
     get 'video', on: :collection
     member do
+      get 'insights'
       put 'pay'
+      put 'push_to_flex'
       get 'embed'
       get 'video_embed'
       get 'embed_panel'
@@ -71,11 +82,13 @@ Catarse::Application.routes.draw do
   resources :users do
     resources :credit_cards, controller: 'users/credit_cards', only: [ :destroy ]
     member do
+      get :balance
       get :unsubscribe_notifications
       get :credits
       get :settings
       get :billing
       get :reactivate
+      post :new_password
     end
 
     resources :unsubscribes, only: [:create]
@@ -98,6 +111,8 @@ Catarse::Application.routes.draw do
   get "/new-admin" => 'high_voltage/pages#show', id: 'new_admin'
   get "/explore" => 'high_voltage/pages#show', id: 'explore'
   get "/team" => 'high_voltage/pages#show', id: 'team'
+  get "/flex" => 'high_voltage/pages#show', id: 'flex'
+  get "/projects_dashboard" => 'high_voltage/pages#show', id: 'projects_dashboard'
 
 
   # User permalink profile
@@ -128,19 +143,11 @@ Catarse::Application.routes.draw do
 
     resources :financials, only: [ :index ]
 
-    resources :contributions, only: [ :index, :update, :show ] do
+    resources :contributions, only: [] do
       member do
-        get :second_slip
-        put 'pay'
-        put 'change_reward'
-        put 'refund'
-        put 'trash'
-        put 'request_refund'
-        put 'chargeback'
         put 'gateway_refund'
       end
     end
-    resources :users, only: [ :index ]
 
     namespace :reports do
       resources :contribution_reports, only: [ :index ]

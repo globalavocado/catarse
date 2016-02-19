@@ -1,40 +1,52 @@
 # coding: utf-8
 class Project < ActiveRecord::Base
+  include I18n::Alchemy
   PUBLISHED_STATES = ['online', 'waiting_funds', 'successful', 'failed']
   HEADLINE_MAXLENGTH = 100
   NAME_MAXLENGTH = 50
 
+  include Statesman::Adapters::ActiveRecordQueries
   include PgSearch
 
-  include Shared::StateMachineHelpers
   include Shared::Queued
 
-  include Project::StateMachineHandler
+  include Project::BaseValidator
+  include Project::AllOrNothingStateValidator
   include Project::VideoHandler
   include Project::CustomValidators
   include Project::ErrorGroups
+  include Project::FlexibleHandler
 
   has_notifications
 
   mount_uploader :uploaded_image, ProjectUploader
 
-  delegate  :display_online_date, :display_card_status, :display_status, :progress,
-            :display_image, :display_expires_at, :remaining_text, :time_to_go,
-            :display_pledged, :display_pledged_with_cents, :display_goal, :remaining_days, :progress_bar,
-            :status_flag, :state_warning_template, :display_card_class, :display_errors, to: :decorator
+  delegate  :display_card_status, :display_status, :progress,
+            :display_image, :display_expires_at, :time_to_go,
+            :display_pledged, :display_pledged_with_cents, :display_goal, :progress_bar,
+            :status_flag, :display_errors, to: :decorator
+  delegate :bank, to: :account
 
   belongs_to :user
   belongs_to :category
   belongs_to :city
+  belongs_to :origin
+  has_one :flexible_project
   has_one :project_total
   has_one :account, class_name: "ProjectAccount", inverse_of: :project
+  has_many :taggings
+  has_many :tags, through: :taggings
   has_many :rewards
   has_many :contributions
+  has_many :project_errors
   has_many :contribution_details
   has_many :payments, through: :contributions
   has_many :posts, class_name: "ProjectPost", inverse_of: :project
   has_many :budgets, class_name: "ProjectBudget", inverse_of: :project
   has_many :unsubscribes
+  has_many :reminders, class_name: 'ProjectReminder', inverse_of: :project
+
+  has_many :project_transitions, autosave: false
 
   accepts_nested_attributes_for :rewards, allow_destroy: true
   accepts_nested_attributes_for :user
@@ -61,6 +73,30 @@ class Project < ActiveRecord::Base
     search_tsearch(term).presence || search_trm(term)
   end
 
+  # With state scopes
+  scope :maybe_flex, -> {
+    joins("LEFT JOIN flexible_projects fp on fp.project_id = projects.id")
+  }
+  scope :with_state, -> (state) {
+      maybe_flex.where("coalesce(fp.state, projects.state) in (?)", state)
+  }
+  scope :without_state, -> (state) {
+      maybe_flex.where("coalesce(fp.state, projects.state) not in (?)", state)
+  }
+
+  # This scope is used only on this model
+  scope :between_dates, -> (column, start_at, end_at) {
+    where(
+      "projects.#{column} between :start and :end",
+      {
+        start: start_at,
+        end: end_at
+      })
+  }
+
+  scope :with_states, -> (state) { with_state(state) }
+  scope :without_states, -> (state) { without_state(state) }
+
   # Used to simplify a has_scope
   scope :successful, ->{ with_state('successful') }
   scope :with_project_totals, -> { joins('LEFT OUTER JOIN project_totals ON project_totals.project_id = projects.id') }
@@ -70,9 +106,38 @@ class Project < ActiveRecord::Base
   scope :by_id, ->(id) { where(id: id) }
   scope :by_goal, ->(goal) { where(goal: goal) }
   scope :by_category_id, ->(id) { where(category_id: id) }
-  scope :by_online_date, ->(online_date) { where(online_date: Time.zone.parse( online_date ).. Time.zone.parse( online_date ).end_of_day) }
-  scope :by_expires_at, ->(expires_at) { where(expires_at: Time.zone.parse( expires_at ).. Time.zone.parse( expires_at ).end_of_day) }
-  scope :by_updated_at, ->(updated_at) { where(updated_at: Time.zone.parse( updated_at ).. Time.zone.parse( updated_at ).end_of_day) }
+
+  scope :by_online_date, ->(online_date) {
+    between_dates('online_at',
+      Time.zone.parse(online_date),
+      Time.zone.parse(online_date).end_of_day )}
+
+  scope :by_expires_at, ->(expires_at) {
+    between_dates('expires_at',
+      Time.zone.parse(expires_at),
+      Time.zone.parse(expires_at).end_of_day)}
+
+  scope :by_updated_at, ->(updated_at) {
+    between_dates('updated_at',
+      Time.zone.parse(updated_at),
+      Time.zone.parse(updated_at).end_of_day)}
+
+  scope :recent, -> {
+    between_dates('online_at', 5.days.ago, Time.current) }
+
+  scope :expiring, -> {
+    not_expired.between_dates('expires_at', Time.current, 2.weeks.from_now) }
+
+  scope :not_expiring, -> {
+    not_expired.where.not(expires_at: Time.current.. 2.weeks.from_now) }
+
+  scope :financial, -> {
+    with_states(['online', 'successful', 'waiting_funds']).
+      between_dates('expires_at', 15.days.ago, Time.current) }
+
+  scope :of_current_week, -> {
+      between_dates('online_at', 7.days.ago, Time.current) }
+
   scope :by_permalink, ->(p) { without_state('deleted').where("lower(permalink) = lower(?)", p) }
   scope :recommended, -> { where(recommended: true) }
   scope :in_funding, -> { not_expired.with_states(['online']) }
@@ -80,51 +145,48 @@ class Project < ActiveRecord::Base
   scope :user_name_contains, ->(term) { joins(:user).where("unaccent(upper(users.name)) LIKE ('%'||unaccent(upper(?))||'%')", term) }
   scope :to_finish, ->{ expired.with_states(['online', 'waiting_funds']) }
   scope :visible, -> { without_states(['draft', 'rejected', 'deleted', 'in_analysis', 'approved']) }
-  scope :financial, -> { with_states(['online', 'successful', 'waiting_funds']).where(expires_at: 15.days.ago.. Time.current) }
   scope :expired, -> { where("projects.is_expired") }
   scope :not_expired, -> { where("not projects.is_expired") }
-  scope :expiring, -> { not_expired.where(expires_at: Time.current.. 2.weeks.from_now) }
-  scope :not_expiring, -> { not_expired.where.not(expires_at: Time.current.. 2.weeks.from_now) }
-  scope :recent, -> { where(online_date: 5.days.ago.. Time.current) }
   scope :ordered, -> { order(created_at: :desc)}
-  scope :order_status, ->{ order("
-                                     CASE projects.state
+  scope :update_ordered, -> { order("updated_at DESC, created_at DESC") }
+  scope :order_status, ->{ maybe_flex.order("
+                                     CASE coalesce(fp.state, projects.state)
                                      WHEN 'online' THEN 1
                                      WHEN 'waiting_funds' THEN 2
                                      WHEN 'successful' THEN 3
                                      WHEN 'failed' THEN 4
                                      END ASC")}
-  scope :most_recent_first, ->{ order("projects.online_date DESC, projects.created_at DESC") }
+  scope :most_recent_first, ->{ order("projects.id DESC") }
   scope :order_for_admin, -> {
-    reorder("
-            CASE projects.state
+    maybe_flex.reorder("
+            CASE coalesce(fp.state, projects.state)
             WHEN 'in_analysis' THEN 1
             WHEN 'waiting_funds' THEN 2
             WHEN 'successful' THEN 3
             WHEN 'failed' THEN 4
-            END ASC, projects.online_date DESC, projects.created_at DESC")
+            END ASC, projects.online_at DESC, projects.created_at DESC")
   }
 
   scope :with_contributions_confirmed_last_day, -> {
     joins(:contributions).merge(Contribution.confirmed_last_day).uniq
   }
 
-  scope :of_current_week, -> { where(online_date: 7.days.ago.. Time.current) }
-
   attr_accessor :accepted_terms
 
   validates_acceptance_of :accepted_terms, on: :create
   ##validation for all states
-  validates_presence_of :name, :user, :category, :permalink
+  validates_presence_of :name, :user, :category, :service_fee
   validates_length_of :headline, maximum: HEADLINE_MAXLENGTH
-  validates_numericality_of :online_days, less_than_or_equal_to: 60, greater_than: 0,
+  validates_numericality_of :online_days, less_than_or_equal_to: 60, greater_than: 1,
     if: ->(p){ p.online_days.present? && ( p.online_days_was.nil? || p.online_days_was <= 60 ) }
   validates_numericality_of :goal, greater_than: 9, allow_blank: true
+  validates_numericality_of :service_fee, greater_than: 0, less_than_or_equal_to: 1
   validates_uniqueness_of :permalink, case_sensitive: false
   validates_format_of :permalink, with: /\A(\w|-)*\Z/
+  validates_presence_of :permalink, allow_nil: true
 
 
-  [:between_created_at, :between_expires_at, :between_online_date, :between_updated_at].each do |name|
+  [:between_created_at, :between_expires_at, :between_online_at, :between_updated_at].each do |name|
     define_singleton_method name do |starts_at, ends_at|
       return all unless starts_at.present? && ends_at.present?
       field = name.to_s.gsub('between_','')
@@ -146,7 +208,7 @@ class Project < ActiveRecord::Base
   end
 
   def can_show_account_link?
-    ['online', 'waiting_funds', 'successful', 'approved'].include? state
+    (self.mode == 'flex') || (['online', 'waiting_funds', 'successful', 'approved'].include? state)
   end
 
   def can_show_preview_link?
@@ -169,6 +231,10 @@ class Project < ActiveRecord::Base
     @total_contributions ||= project_total.try(:total_contributions).to_i
   end
 
+  def total_contributors
+    @total_contributors ||= project_total.try(:total_contributors).to_i
+  end
+
   def total_payment_service_fee
     project_total.try(:total_payment_service_fee).to_f
   end
@@ -180,6 +246,7 @@ class Project < ActiveRecord::Base
   def accept_contributions?
     online? && !expired?
   end
+
   def reached_goal?
     pledged >= goal
   end
@@ -194,10 +261,6 @@ class Project < ActiveRecord::Base
 
   def new_draft_recipient
     User.find_by_email CatarseSettings[:email_projects]
-  end
-
-  def should_fail?
-    expired? && !reached_goal?
   end
 
   def notify_owner(template_name, params = {})
@@ -244,7 +307,7 @@ class Project < ActiveRecord::Base
       project_state: self.state,
       category: self.category.name_pt,
       project_goal: self.goal,
-      project_online_date: self.online_date,
+      project_online_date: self.online_at,
       project_expires_at: self.expires_at,
       project_address_city: self.account.try(:address_city),
       project_address_state: self.account.try(:address_state),
@@ -256,7 +319,73 @@ class Project < ActiveRecord::Base
     to_analytics.to_json
   end
 
+  def mode
+    # aon is the default value because now we always need a mode for a project
+    # After the next refactoring (when we extract aon to another table) this will
+    # no longer be necessary
+    pluck_from_database("mode") || 'aon'
+  end
+
   def pluck_from_database attribute
     Project.where(id: self.id).pluck("projects.#{attribute}").first
+  end
+
+  def open_for_contributions?
+    pluck_from_database(:open_for_contributions)
+  end
+
+  def all_tags=(names)
+    self.tags = names.split(',').map do |name|
+      Tag.find_or_create_by(slug: name.parameterize) do |tag|
+        tag.name = name.strip
+      end
+    end
+  end
+
+  def all_tags
+    tags.map(&:name).join(", ")
+  end
+
+  def update_expires_at
+    if self.online_days.present? && self.online_at.present?
+      self.expires_at = ((self.mode == 'flex' ? Time.current : self.online_at.in_time_zone) + self.online_days.days).end_of_day
+    end
+  end
+
+  # State machine delegation methods
+  delegate :push_to_draft, :reject, :push_to_online, :finish,
+    :send_to_analysis, :approve, :push_to_trash, :can_transition_to?,
+    :transition_to, :can_reject?, :can_push_to_trash?,
+    :can_push_to_online?, :can_push_to_draft?, :can_approve?, to: :state_machine
+
+  # Get all states names from AonProjectMachine
+  # Used in some legacy parts of the admin
+  # @TODO: Remove this method
+  def self.state_names
+    AonProjectMachine.states.map(&:to_sym)
+  end
+
+  # Init all or nothing machine
+  def state_machine
+    @state_machine ||= AonProjectMachine.new(self, {
+      transition_class: ProjectTransition
+    })
+  end
+
+  %w(
+    draft rejected online successful waiting_funds
+    deleted in_analysis approved failed
+  ).each do |st|
+    define_method "#{st}_at" do
+      pluck_from_database("#{st}_at")
+    end
+
+    define_method "#{st}?" do
+      if self.state.nil?
+        self.state_machine.current_state == st
+      else
+        self.state == st
+      end
+    end
   end
 end

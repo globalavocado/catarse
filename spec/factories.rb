@@ -15,8 +15,16 @@ FactoryGirl.define do
     "#{n}"
   end
 
+  sequence :serial do |n|
+    n
+  end
+
   sequence :permalink do |n|
     "foo_page_#{n}"
+  end
+
+  sequence :domain do |n| 
+    "foo#{n}lorem.com"
   end
 
   factory :category_follower do |f|
@@ -26,6 +34,23 @@ FactoryGirl.define do
 
   factory :country do |f|
     f.name "Brasil"
+  end
+
+  factory :origin do |f|
+    f.referral { generate(:permalink) }
+    f.domain { generate(:domain) }
+  end
+
+  factory :project_reminder do |f|
+    f.association :user
+    f.association :project
+  end
+
+  factory :balance_transaction do |f| 
+    f.association :user
+    f.association :project
+    f.amount 100
+    f.event_name 'foo'
   end
 
   factory :user do |f|
@@ -70,7 +95,6 @@ FactoryGirl.define do
     f.about_html "Foo bar"
     f.headline "Foo bar"
     f.goal 10000
-    f.online_date Time.now
     f.online_days 5
     f.more_links 'Ipsum dolor'
     f.first_contributions 'Foo bar'
@@ -78,10 +102,47 @@ FactoryGirl.define do
     f.state 'online'
     f.budget '1000'
     f.uploaded_image File.open("#{Rails.root}/spec/support/testimg.png")
+    after :create do |project| 
+      unless project.project_transitions.where(to_state: project.state).present?
+        FactoryGirl.create(:project_transition, to_state: project.state, project: project)
+      end
+
+      # should set expires_at when create a project in these states
+      if %w(online waiting_funds failed successful).include?(project.state) && project.online_days.present? && project.online_at.present?
+        project.expires_at = (project.online_at + project.online_days.days).end_of_day
+        project.save
+      end
+    end
     after :build do |project|
       project.account = build(:project_account, project: nil)
       project.rewards.build(deliver_at: Time.now, minimum_value: 10, description: 'test')
     end
+  end
+
+  factory :flexible_project do |f|
+    f.association :project
+    f.state 'draft'
+
+    after :create do |flex_project| 
+      FactoryGirl.create(:flexible_project_transition, {
+        to_state: flex_project.state,
+        flexible_project: flex_project
+      })
+    end
+  end
+
+  factory :flexible_project_transition do |f|
+    f.association :flexible_project
+    f.most_recent true
+    f.to_state 'online'
+    f.sort_key { generate(:serial) }
+  end
+
+  factory :project_transition do |f|
+    f.association :project
+    f.most_recent true
+    f.to_state 'online'
+    f.sort_key { generate(:serial) }
   end
 
   factory :project_account do |f|

@@ -16,19 +16,25 @@ class ApplicationController < ActionController::Base
 
   before_filter :configure_permitted_parameters, if: :devise_controller?
 
-  helper_method :referral_link, :render_projects, :should_show_beta_banner?,
+  helper_method :referral, :render_projects,
     :render_feeds, :can_display_pending_refund_alert?
 
   before_filter :set_locale
 
   before_action :force_www
 
-  def referral_link
-    session[:referral_link]
+  def referral
+    {
+      ref: session[:referral_link],
+      domain: session[:origin_referral]
+    }
   end
 
   def can_display_pending_refund_alert?
-    @can_display_alert ||= (current_user && current_user.pending_refund_payments.present? && controller_name.to_sym != :bank_accounts)
+    @can_display_alert ||= current_user && current_user.pending_refund_payments.present? &&
+                            controller_name.to_sym != :bank_accounts &&
+                            controller_name.to_sym != :donations &&
+                            action_name.to_sym != :no_account_refund
   end
 
   def render_projects collection, ref, locals = {}
@@ -39,23 +45,28 @@ class ApplicationController < ActionController::Base
     render_to_string partial: 'users/feeds/feed', collection: collection, locals: locals
   end
 
-  def should_show_beta_banner?
-    current_user.nil? || current_user.projects.empty?
-  end
-
-  def should_show_beta_banner?
-    current_user.nil? || current_user.projects.empty?
-  end
-
   def referral_it!
     if request.env["HTTP_REFERER"] =~ /catarse\.me/
       # For local referrers we only want to store the first ref parameter
       session[:referral_link] ||= params[:ref]
+      session[:origin_referral] ||= request.env["HTTP_REFERER"]
     else
       # For external referrers should always overwrite referral_link
-      session[:referral_link] = params[:ref] || request.env["HTTP_REFERER"]
+      session[:referral_link] = params[:ref]
+      session[:origin_referral] = request.env["HTTP_REFERER"]
     end
+
   end
+
+  # Used on external services and generic email
+  # templates, just need to redirect to last
+  # updated or created project dashboard
+  def redirect_to_last_edit
+    authorize Project.new(user_id: current_user.try(:id)), :create?
+    lp = current_user.projects.update_ordered.first
+    redirect_to edit_project_path lp
+  end
+
 
   private
   def force_www

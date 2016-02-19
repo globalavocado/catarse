@@ -4,6 +4,7 @@ App.addChild('Contribution', {
   events: {
     'click .radio label' : 'clickReward',
     'click .submit-form' : 'submitForm',
+    'keyup .user-reward-value' : 'submitOnReturnKey',
     'click .user-reward-value' : 'clearOnFocus',
     'input #contribution_value' : 'restrictChars'
   },
@@ -11,6 +12,13 @@ App.addChild('Contribution', {
   restrictChars: function(event){
     var $target = $(event.target);
     $target.val($target.val().replace(/[^\d,]/, ''));
+  },
+
+  submitOnReturnKey: function(event) {
+    event.preventDefault();
+    if(event.keyCode === 13) {
+      this.$('.submit-form').trigger('click');
+    }
   },
 
   submitForm: function(event){
@@ -35,9 +43,13 @@ App.addChild('Contribution', {
     this.$('.user-reward-value').mask('000.000.000,00', {reverse: true});
     this.$value = this.$('#contribution_value');
     this.$minimum = this.$('#minimum-value');
-    this.clickReward({currentTarget: this.$('input[type=radio]:checked').parent()});
-    this.isOnAutoScroll = false;
-    this.activateFloattingHeader();
+    if(this.$('input[type=radio]').length > 0) {
+      this.clickReward({currentTarget: this.$('input[type=radio]:checked').parent()});
+      this.isOnAutoScroll = false;
+      this.activateFloattingHeader();
+    }
+    // copy default value from rendered contribution
+    $('.user-reward-value:first').val($('#contribution_value').val());
   },
 
   activateFloattingHeader: function(){

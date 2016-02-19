@@ -1,5 +1,6 @@
 # coding: utf-8
 class ProjectsController < ApplicationController
+
   after_filter :verify_authorized, except: %i[show index video video_embed embed embed_panel about_mobile]
   after_filter :redirect_user_back_after_login, only: %i[index show]
   before_action :authorize_and_build_resources, only: %i[edit]
@@ -34,10 +35,12 @@ class ProjectsController < ApplicationController
 
   def create
     @project = Project.new
-    @project.attributes = permitted_params.merge(user: current_user, referral_link: referral_link)
+    @project.attributes = permitted_params.merge(
+      user: current_user,
+      origin: Origin.process_hash(referral))
     authorize @project
     if @project.save
-      redirect_to edit_project_path(@project, anchor: 'home')
+      redirect_to insights_project_path(@project)
     else
       render :new
     end
@@ -58,13 +61,21 @@ class ProjectsController < ApplicationController
     resource_action :push_to_online
   end
 
+  def insights
+    authorize resource, :update?
+  end
+
   def update
     authorize resource
 
     #need to check this before setting new attributes
     should_validate = should_use_validate
 
-    resource.attributes = permitted_params
+    resource.localized.attributes = permitted_params
+    #can't use localized for fee
+    if permitted_params[:service_fee]
+      resource.service_fee = permitted_params[:service_fee]
+    end
 
     if resource.save(validate: should_validate)
       flash[:notice] = t('project.update.success')
@@ -93,9 +104,21 @@ class ProjectsController < ApplicationController
     render json: nil
   end
 
+  # TODO: remove when flex goes public
+  def push_to_flex
+    authorize resource
+    resource.build_flexible_project
+    resource.state = 'draft'
+    resource.online_days = nil
+    resource.expires_at = nil
+    resource.save!
+    resource.project_transitions.destroy_all
+    redirect_to :back 
+  end
+
   def embed
     resource
-    render partial: 'card', layout: 'embed', locals: {embed_link: true, ref: (params[:ref] || 'embed')}
+    render partial: 'card', layout: 'embed', locals: {embed_link: true, ref: (params[:ref] || 'ctrse_embed')}
   end
 
   def embed_panel
@@ -116,22 +139,22 @@ class ProjectsController < ApplicationController
     @post =  (params[:project_post_id].present? ? resource.posts.where(id: params[:project_post_id]).first : resource.posts.build)
     @rewards = @project.rewards.rank(:row_order)
     @rewards = @project.rewards.build unless @rewards.present?
-    @budget = resource.budgets.build
 
     resource.build_account unless resource.account
   end
 
   def resource_action action_name, success_redirect=nil
     if resource.send(action_name)
-      if referral_link.present?
-        resource.update_attribute :referral_link, referral_link
+      if resource.origin.nil? && referral.present?
+        resource.update_attribute(
+          :origin_id, Origin.process_hash(referral).try(:id))
       end
 
       flash[:notice] = t("projects.#{action_name.to_s}")
       if success_redirect
         redirect_to edit_project_path(@project, anchor: success_redirect)
       else
-        redirect_to edit_project_path(@project, anchor: 'home')
+        redirect_to insights_project_path(@project)
       end
     else
       flash.now[:notice] = t("projects.#{action_name.to_s}_error")

@@ -4,19 +4,18 @@ ruby '2.2.3'
 
 gem 'rails', '~> 4.1.6'
 
-#gem 'catarse_api', path: '~/code/catarse_api'
-gem 'catarse_api', github: 'catarse/catarse_api'
 gem 'protected_attributes'
 gem 'rails-observers'
 gem 'rb-readline'
 
-gem 'sidekiq',  '~> 3.1.3'
+gem 'sidekiq',  '~> 4.0.1'
 
 # Turns every field on a editable one
 gem "best_in_place", :git => "git://github.com/bernat/best_in_place", ref: "ee95961e639022e6aa528704b8cb4789596ea61b"
 
 # State machine for attributes on models
 gem 'state_machine', require: 'state_machine/core'
+gem 'statesman'
 
 # Database and data related
 gem 'pg', '0.17.1'
@@ -24,9 +23,9 @@ gem 'dbhero', '>= 1.1.8'
 gem 'postgres-copy'
 gem 'pg_search'
 gem 'i18n_alchemy'
+gem "i18n-js", ">= 3.0.0.rc11"
 
 gem 'schema_plus'
-gem 'chartkick'
 gem 'catarse_settings_db', '>= 0.1.0'
 
 # Notifications
@@ -37,8 +36,7 @@ gem 'mixpanel-ruby'
 gem 'mixpanel_client'
 
 # Payment engines
-gem 'catarse_moip', '~> 3.2.0'
-gem 'catarse_pagarme', '~> 2.7.12'
+gem 'catarse_pagarme', '~> 2.8.5'
 #gem 'catarse_pagarme', path: '../catarse_pagarme'
 
 # Decorators
@@ -58,9 +56,11 @@ gem 'omniauth'
 gem 'omniauth-facebook'
 gem 'devise'
 gem 'pundit'
+gem 'json_web_token'
 
 # Email marketing
 gem 'catarse_monkeymail', '>= 0.1.6'
+gem 'gridhook'
 
 # HTML manipulation and formatting
 gem 'simple_form'
@@ -70,7 +70,7 @@ gem 'kaminari'
 gem 'redactor-rails', github: 'catarse/redactor-rails'
 
 # Uploads
-gem 'carrierwave', '~> 0.10.0'
+gem 'carrierwave', github: 'carrierwaveuploader/carrierwave', ref: '1578777fe3f30140347ebf27d1943471bbe4d425'
 gem "mini_magick"
 
 # Other Tools
@@ -80,21 +80,16 @@ gem 'feedjira'
 gem 'inherited_resources'
 gem 'has_scope', '>= 0.6.0.rc'
 gem 'spectator-validates_email',  require: 'validates_email'
-gem 'video_info', '>= 1.1.1'
-gem 'httparty', '~> 0.6.1' # this version is required by moip gem, otherwise payment confirmation will break
+gem 'video_info', '~> 2.4.2'
 gem 'typhoeus'
 
 # Translations
 gem 'http_accept_language'
 gem 'routing-filter', '~> 0.4.0.pre'
 
-# Payment
-gem 'moip', github: 'catarse/moip-ruby', ref: 'c0225ad71645cd1df35dafa1e45c9f092b3abb9e'
-gem 'httpclient',     '>= 2.2.5'
-
 group :production do
   # Gem used to handle image uploading
-  gem 'fog', '>= 1.3.1'
+  gem 'fog-aws'
 
   # Workers, forks and all that jazz
   gem 'unicorn'
@@ -155,7 +150,3 @@ gem 'coffee-rails'
 gem 'compass-rails'
 gem 'uglifier'
 gem 'sprockets'
-
-# FIXME: Not-anymore-on-development
-# Gems that are with 1 or more years on the vacuum
-gem 'weekdays'

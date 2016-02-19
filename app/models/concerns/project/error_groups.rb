@@ -8,6 +8,7 @@ module Project::ErrorGroups
         goal: [:goal, :online_days],
         description: [:about_html],
         budget: [:budget],
+        announce_expiration: [:online_days],
         card: [:uploaded_image, :headline],
         video: [:video_url],
         reward: [:'rewards.size', :'rewards.minimum_value', :'rewards.deliver_at'],
@@ -24,6 +25,11 @@ module Project::ErrorGroups
 
     def has_errors_for?(field)
       errors.include?(field)
+    end
+
+    # @TODO use this to handle with flexible project errors on project
+    def errors
+      flexible_project.try(:errors) || super
     end
   end
 end

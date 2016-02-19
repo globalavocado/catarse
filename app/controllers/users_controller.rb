@@ -6,6 +6,11 @@ class UsersController < ApplicationController
   defaults finder: :find_active!
   actions :show, :update, :unsubscribe_notifications, :destroy, :edit
   respond_to :json, only: [:contributions, :projects]
+  before_action :referral_it!, only: [:show]
+
+  def balance
+    authorize resource, :update?
+  end
 
   def destroy
     authorize resource
@@ -52,6 +57,21 @@ class UsersController < ApplicationController
       flash[:error] = t('users.failed_reactivation')
     end
     redirect_to root_path
+  end
+
+  def new_password
+    authorize resource
+
+    if params[:password]
+      @user.password = params[:password]
+      if @user.save
+        render :json => { :success => 'OK' }
+      else
+        render status: 400, :json => { :errors => @user.errors.full_messages  }
+      end
+    else
+      render status: 400, :json => { :errors => ['Missing parameter password'] }
+    end
   end
 
   def edit
@@ -105,6 +125,7 @@ class UsersController < ApplicationController
       params[:user][:reminders].keys.each do |project_id|
         if params[:user][:reminders][:"#{project_id}"] == "false"
           Project.find(project_id).delete_from_reminder_queue(@user.id)
+          @user.reminders.where(project_id: project_id).destroy_all
         end
       end
     end

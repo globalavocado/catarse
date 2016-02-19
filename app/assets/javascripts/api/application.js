@@ -1,9 +1,10 @@
-//= require mithril
+//= require mithril/mithril.js
 //= require underscore
 //= require mithril.postgrest
 //= require moment
 //= require replace-diacritics
 //= require chartjs
+//= require i18n/translations
 //= require api/init
 //= require catarse.js/dist/catarse.js
 //= require_self
@@ -14,33 +15,25 @@
   Chart.defaults.Line.pointHitDetectionRadius = 0;
   Chart.defaults.global.scaleFontFamily = "proxima-nova";
 
-  var adminRoot = document.getElementById('new-admin'),
-      teamRoot = document.getElementById('team-root'),
-      projectIndexRoot = document.getElementById('project-index-root'),
-      projectInsightsRoot = document.getElementById('project-insights-root'),
-      projectShowRoot = document.getElementById('project-show-root');
+  I18n.defaultLocale = "pt";
+  I18n.locale = "pt";
+
+  var adminRoot = document.getElementById('new-admin');
 
   if(adminRoot){
-    m.mount(adminRoot, c.admin.Contributions);
+    m.route.mode = 'hash';
+    m.route(adminRoot, '/', {
+      '/': m.component(c.admin.Contributions, {root: adminRoot}),
+      '/users': m.component(c.admin.Users)
+    });
   }
 
-  if(teamRoot){
-    m.mount(teamRoot, c.pages.Team);
-  }
-
-  if(projectIndexRoot){
-    m.mount(projectIndexRoot, c.contribution.ProjectsHome);
-  }
-
-  if(projectShowRoot) {
-    m.mount(projectShowRoot, m.component(c.project.Show, {
-      project_id: projectShowRoot.getAttribute('data-id')
-    }));
-  }
-
-  if(projectInsightsRoot){
-    m.mount(projectInsightsRoot, m.component(c.project.Insights, {root: projectInsightsRoot}));
-  }
+  _.each(document.querySelectorAll('div[data-mithril]'), function(el){
+    var component = c.root[el.attributes['data-mithril'].value],
+        paramAttr = el.attributes['data-parameters'],
+        params = paramAttr && JSON.parse(paramAttr.value);
+    m.mount(el, m.component(component, _.extend({root: el}, params)));
+  });
 }(window.m, window.c, window.Chart));
 
 window.toggleMenu = function(){

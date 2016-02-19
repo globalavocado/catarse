@@ -1,5 +1,6 @@
 # coding: utf-8
 class User < ActiveRecord::Base
+  include I18n::Alchemy
   acts_as_token_authenticatable
   include User::OmniauthHandler
   has_notifications
@@ -12,6 +13,7 @@ class User < ActiveRecord::Base
   delegate  :display_name, :display_image, :short_name, :display_image_html,
     :medium_name, :display_credits, :display_total_of_contributions, :contributions_text,
     :twitter_link, :display_bank_account, :display_bank_account_owner, to: :decorator
+  delegate :bank, to: :bank_account
 
   # FIXME: Please bitch...
   attr_accessible :email, :password, :password_confirmation, :remember_me, :name, :permalink,
@@ -38,6 +40,7 @@ class User < ActiveRecord::Base
 
   belongs_to :country
   has_one :user_total
+  has_one :user_credit
   has_one :bank_account, dependent: :destroy
   has_many :feeds, class_name: 'UserFeed'
   has_many :credit_cards
@@ -45,6 +48,7 @@ class User < ActiveRecord::Base
   has_many :authorizations
   has_many :contributions
   has_many :contribution_details
+  has_many :reminders, class_name: 'ProjectReminder', inverse_of: :user
   has_many :payments, through: :contributions
   has_many :projects, -> do
     without_state(:deleted)
@@ -53,9 +57,11 @@ class User < ActiveRecord::Base
     with_states(Project::PUBLISHED_STATES)
   end, class_name: 'Project'
   has_many :unsubscribes
+  has_many :user_transfers
   has_many :project_posts
+  has_many :donations
   has_many :contributed_projects, -> do
-    distinct.where("contributions.was_confirmed").order('projects.created_at DESC')
+    distinct.where("contributions.was_confirmed")
   end, through: :contributions, source: :project
   has_many :category_followers, dependent: :destroy
   has_many :categories, through: :category_followers
@@ -84,44 +90,6 @@ class User < ActiveRecord::Base
   scope :subscribed_to_project, ->(project_id) {
     who_contributed_project(project_id).
     where("id NOT IN (SELECT user_id FROM unsubscribes WHERE project_id = ?)", project_id)
-  }
-
-  scope :by_email, ->(email){ where('email ~* ?', email) }
-  scope :by_payer_email, ->(email) {
-    where('EXISTS(
-      SELECT true
-      FROM contributions
-      JOIN payment_notifications ON contributions.id = payment_notifications.contribution_id
-      WHERE contributions.user_id = users.id AND payment_notifications.extra_data ~* ?)', email)
-  }
-  scope :by_name, ->(name){ where('users.name ~* ?', name) }
-  scope :by_id, ->(id){ where(id: id) }
-  scope :by_key, ->(key){ where('EXISTS(
-                                SELECT true
-                                FROM
-                                  contributions c
-                                  JOIN payments p ON c.id = p.contribution_id
-                                WHERE c.user_id = users.id AND p.key = ?)', key
-                               ) }
-  scope :has_credits, -> { joins(:user_total).where('user_totals.credits > 0 and not users.zero_credits') }
-  scope :already_used_credits, -> {
-    has_credits.
-    where("EXISTS (
-            SELECT true
-            FROM
-              contributions c
-              JOIN payments p ON c.id = p.contribution_id
-            WHERE p.uses_credits AND p.state = 'paid' AND c.user_id = users.id)")
-  }
-  scope :has_not_used_credits_last_month, -> { has_credits.
-    where("NOT EXISTS (
-                SELECT true
-                FROM
-                  contributions c
-                  JOIN payments p ON c.id = p.contribution_id
-                WHERE
-                  current_timestamp - c.created_at < '1 month'::interval
-                  AND p.uses_credits AND p.state = 'paid' AND c.user_id = users.id)")
   }
 
   #FIXME: very slow query
@@ -159,6 +127,15 @@ class User < ActiveRecord::Base
     }).select do |payment|
       !payment.already_in_refund_queue?
     end
+  end
+
+  def has_pending_legacy_refund?
+    user_transfers.where(status: ['pending_transfer', 'processing']).exists?
+  end
+
+  #in cents
+  def credits_amount
+    (credits * 100).to_i
   end
 
   def has_online_project?
@@ -211,12 +188,7 @@ class User < ActiveRecord::Base
 
   def credits
     return 0 if zero_credits
-    user_total.try(:credits).to_f
-  end
-
-  def projects_in_reminder
-    reminder_notifications = ProjectNotification.where(template_name: 'reminder', user_id: self.id).where("deliver_at > ?", Time.current)
-    Project.where(id: reminder_notifications.map {|notification| notification.project})
+    user_credit.try(:credits).to_f
   end
 
   def total_contributed_projects

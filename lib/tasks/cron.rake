@@ -5,14 +5,15 @@ namespace :cron do
 
   desc "Tasks that should run daily"
   task daily: [ :notify_project_owner_about_new_confirmed_contributions,
-               :deliver_projects_of_week, :verify_pagarme_transactions,
-               :verify_pagarme_transfers, :notify_pending_refunds, :request_direct_refund_for_failed_refund]
+               :verify_pagarme_transactions,
+               :verify_pagarme_transfers, :verify_pagarme_user_transfers, :notify_pending_refunds, :request_direct_refund_for_failed_refund]
 
   desc "Refresh all materialized views"
   task refresh_materialized_views: :environment do
     puts "refreshing views"
     Statistics.refresh_view
     UserTotal.refresh_view
+    CategoryTotal.refresh_view
   end
 
   desc 'Request refund for failed credit card refunds'
@@ -23,12 +24,15 @@ namespace :cron do
     end
   end
 
-  desc 'Add missing reminder jobs'
+  desc 'Add reminder to scheduler'
   task schedule_reminders: :environment do
-    ProjectNotification.where("template_name = 'reminder' and sent_at is null and deliver_at >= now()").find_each do |notification|
-      has_on_queue = notification.project.exists_on_scheduled_jobs('UserNotifier::EmailWorker', ['ProjectNotification', notification.id])
-      puts "#{notification.user.name} ==> #{has_on_queue} => #{notification.to_json}"
-      notification.deliver unless has_on_queue
+    ProjectReminder.can_deliver.find_each do |reminder|
+      puts "found reminder for user -> #{reminder.user_id} project -> #{reminder.project}"
+      project = reminder.project
+      project.notify_once(
+        'reminder',
+        reminder.user,
+        project)
     end
   end
 
@@ -68,11 +72,4 @@ namespace :cron do
     end
   end
 
-  desc "Deliver a collection of recents projects of a category"
-  task deliver_projects_of_week: :environment do
-    puts "Delivering projects of the week..."
-    Category.with_projects_on_this_week.each do |category|
-      category.deliver_projects_of_week_notification
-    end
-  end
 end
